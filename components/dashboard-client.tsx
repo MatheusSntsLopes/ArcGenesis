@@ -129,26 +129,27 @@ export default function DashboardClient() {
     }
   }
 
-  async function loadWalletData(currentProvider: BrowserProvider, currentAddress: string) {
-    try {
-      setLoadingOwned(true);
+async function loadWalletData(currentProvider: BrowserProvider, currentAddress: string) {
+  try {
+    setLoadingOwned(true);
 
-      const nativeBalance = await currentProvider.getBalance(currentAddress);
-      const realBalance = Number(formatEther(nativeBalance));
-      setBalance(formatBalance(String(realBalance)));
+    const nativeBalance = await currentProvider.getBalance(currentAddress);
+    const realBalance = Number(formatEther(nativeBalance));
+    setBalance(formatBalance(String(realBalance)));
 
-      const initialVirtualBalance = readVirtualBalance(currentAddress, 100);
-      setVirtualBalance(initialVirtualBalance);
+    const initialVirtualBalance = readVirtualBalance(currentAddress, 100);
+    setVirtualBalance(initialVirtualBalance);
 
-      const contract = getGiftArcContract(currentProvider);
-      const tokenIds = await contract.tokensOf(currentAddress);
-      const nftList: OwnedNft[] = [];
-      const validKeys = new Set(STORE_NFTS.map((item) => item.key));
-      const validImages = new Set(
-        STORE_NFTS.map((item) => `${typeof window !== "undefined" ? window.location.origin : ""}${item.image}`)
-      );
+    const contract = getGiftArcContract(currentProvider);
+    const tokenIds = await contract.tokensOf(currentAddress);
 
-      for (const rawId of tokenIds as bigint[]) {
+    const validKeys = new Set(STORE_NFTS.map((item) => item.key));
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const validImages = new Set(STORE_NFTS.map((item) => `${origin}${item.image}`));
+
+    const nftResults = await Promise.all(
+      (tokenIds as bigint[]).map(async (rawId) => {
         const tokenId = Number(rawId);
 
         let tokenUri = "";
@@ -157,9 +158,8 @@ export default function DashboardClient() {
         try {
           tokenUri = await contract.tokenURI(tokenId);
           parsed = parseDataTokenUri(tokenUri);
-        } catch (err) {
-          console.warn("Skipping token with invalid tokenURI:", tokenId, err);
-          continue;
+        } catch {
+          return null;
         }
 
         let rarity = "UNKNOWN";
@@ -197,33 +197,33 @@ export default function DashboardClient() {
         }
 
         const storeMatch = STORE_NFTS.find(
-          (item) =>
-            item.key === designName ||
-            `${typeof window !== "undefined" ? window.location.origin : ""}${item.image}` === image
+          (item) => item.key === designName || `${origin}${item.image}` === image
         );
 
         if (!storeMatch && !validKeys.has(designName) && !validImages.has(image)) {
-          continue;
+          return null;
         }
 
-        nftList.push({
+        return {
           tokenId,
           name: storeMatch?.title || name,
           rarity: storeMatch?.rarity || rarity,
           amount: storeMatch?.price || amount,
           image: storeMatch?.image || image,
           message: message || storeMatch?.message || "",
-        });
-      }
+        };
+      })
+    );
 
-      setOwnedNfts(nftList.reverse());
-    } catch (err: any) {
-      console.error("loadWalletData error:", err);
-      setError(err?.shortMessage || err?.reason || err?.message || "Failed to load wallet data");
-    } finally {
-      setLoadingOwned(false);
-    }
+    const nftList = nftResults.filter(Boolean) as OwnedNft[];
+    setOwnedNfts(nftList.reverse());
+  } catch (err: any) {
+    console.error("loadWalletData error:", err);
+    setError(err?.shortMessage || err?.reason || err?.message || "Failed to load wallet data");
+  } finally {
+    setLoadingOwned(false);
   }
+}
 
   async function mintNft(nft: StoreNft) {
     if (!provider) {
@@ -311,7 +311,22 @@ export default function DashboardClient() {
       setVirtualBalance(newBalance);
       writeVirtualBalance(address, newBalance);
 
-      await loadWalletData(freshProvider, signerAddress);
+      //await loadWalletData(freshProvider, signerAddress);
+const newOwnedNft: OwnedNft = {
+  tokenId: tokenId ? Number(tokenId) : Date.now(),
+  name: nft.title,
+  rarity: nft.rarity,
+  amount: nft.price,
+  image: nft.image,
+  message: nft.message,
+};
+
+setOwnedNfts((prev) => {
+  const exists = prev.some((item) => item.tokenId === newOwnedNft.tokenId);
+  if (exists) return prev;
+  return [newOwnedNft, ...prev];
+});
+
     } catch (err: any) {
       console.error("Mint error full:", err);
       console.error("Mint error info:", {
